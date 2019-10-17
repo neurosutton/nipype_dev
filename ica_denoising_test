@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Feb  2 16:48:21 2018
+
+@author: brianne
+"""
+
+import numpy as np
+from nipy import load_image, save_image
+from nilearn import image
+from nilearn.plotting import plot_roi
+from nilearn.masking import apply_mask
+from nilearn.input_data import NiftiMapsMasker as nmm
+import matplotlib.pyplot as plt
+from scipy import signal
+
+#Locate the files
+analysisDir = r'/data/analysis/brianne/asdx_2018/pilot_data'
+origDir = r'/data/images'
+
+#Decide who will be in analysis. For this case, only the final letters or numbers of the identifiers were needed.
+subjList = [ 'x001', 'x002','221', '231', '248', '274'] #asdx001, asdx002, ip221, etc.
+
+for s,subj in enumerate(subjList):
+    #Uncorrected
+    raw_img = image.load_img((analysisDir + '/pilot_gift/*'+ subj +'/sw*nii'))
+    #AROMA-corrected
+    aroma_img = image.load_img(analysisDir + '/pilot_gift_aroma/*' + subj + '/ica_test_nowarpFile/denoised_func_data_nonaggr.nii')
+    #GIFT-corrected
+    gift_img = image.load_img(analysisDir + '/pilot_gift/Sub_00' + str(s+1) + '/1/R_s*nii')
+    #subject-specific wm mask
+    wm_mask = image.load_img(origDir + '/*/*' + subj + '*/t1/mwc2*')
+    gm_mask = image.load_img(origDir + '/*/*' + subj + '*/t1/mwc1*')
+
+    #subject-specific rp_files
+    rp_files = glob(origDir + '/*/*' + subj + '*/rest*/rp*txt')
+    rps = np.genfromtxt(rp_files[0])
+    rps = np.mean(rps, axis=1)
+
+    imgDict = {0:"NOTHING (raw)",1:"aroma",2:"gift"} #helps with title substitutions
+    input_imgs = [raw_img, aroma_img, gift_img]
+    print('Printing graphs for {}'.format(subj))
+    for j, input_img in enumerate(input_imgs):
+        dn_type = imgDict.get(j) #"denoising type"; get the value with the key for number (j)
+        print('Average signal from {} after denoising by {} \n'.format(subj, dn_type)) #print statement
+        wm_mask = image.math_img('img > .3', img=image.resample_to_img(wm_mask,input_img)) #Threshold and then make sure it's
+                                # in the same dimensions as the image it's being applied to
+        wm_maskedData = apply_mask(input_img,wm_mask) #restrict the data to a mask
+        wm_maskedData = signal.detrend(wm_maskedData) #include a linear detrending to compare the residuals better
+        #same thing gm
+        gm_mask = image.math_img('img > .3', img=image.resample_to_img(gm_mask,input_img))
+        gm_maskedData = apply_mask(input_img,gm_mask) #restrict the data to a mask
+        gm_maskedData = signal.detrend(gm_maskedData) #include a linear detrending to compare the residuals better
+
+
+        #Make a plot that will help us at a glance
+        plt.clf()
+        fig = plt.figure(figsize=(10,8))
+        ax1 = fig.add_subplot(311)
+        trs = range(1,301)
+        ax1.plot(trs,wm_maskedData.mean(axis=1, keepdims=True), trs, gm_maskedData.mean(axis=1, keepdims=True),'r-',alpha = .6)
+        ax1.set_title('Avg signal over time')
+        ax1.set_xlabel('TR',labelpad=20)
+        ax1.set_ylabel('intensity')
+        #fig1.show()
+
+        ax2 = fig.add_subplot(313)
+        ax2.scatter(rps,wm_maskedData.mean(axis=1),alpha = .6)
+        ax2.scatter(rps,gm_maskedData.mean(axis=1),c='r',alpha = .6)
+        ax2.set_title('Avg signal versus avg motion')
+        ax2.set_ylim((-.001,.001))
+        ax2.set_xlabel('Avg. Regressor', labelpad=20)
+        ax2.set_ylabel('intensity')
+        plt.show()
+        plt.close('all')
